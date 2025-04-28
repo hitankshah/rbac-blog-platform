@@ -1,104 +1,125 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { adminService } from '../../services/api';
-import { useAuth } from '../../context/AuthContext';
+import './Dashboard.css';
+
+// Cache for stats to prevent duplicate requests
+let statsCache = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 60000; // 1 minute cache
 
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const { currentUser, isAdmin } = useAuth();
-  const navigate = useNavigate();
+  const [error, setError] = useState(null);
 
-  // Check if user is admin
-  useEffect(() => {
-    if (!currentUser) {
-      navigate('/login');
+  // Debounced fetch function
+  const fetchStats = useCallback(async () => {
+    // Use cache if available and not expired
+    const currentTime = Date.now();
+    if (statsCache && currentTime - lastFetchTime < CACHE_DURATION) {
+      setStats(statsCache);
+      setLoading(false);
       return;
     }
-    
-    if (!isAdmin) {
-      navigate('/'); // Redirect non-admin users to home page
-      return;
-    }
-  }, [currentUser, isAdmin, navigate]);
 
-  // Fetch admin stats
-  useEffect(() => {
-    const fetchStats = async () => {
-      if (!isAdmin) return;
+    try {
+      const response = await adminService.getStats();
+      const data = response.data;
       
-      try {
-        setLoading(true);
-        const response = await adminService.getStats();
-        setStats(response.data);
-      } catch (err) {
-        console.error('Error fetching admin stats:', err);
-        setError('Failed to load admin statistics');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (isAdmin) {
-      fetchStats();
+      // Update cache
+      statsCache = data;
+      lastFetchTime = currentTime;
+      
+      setStats(data);
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching admin stats:', err);
+      setError('Failed to load dashboard statistics');
+      setLoading(false);
     }
-  }, [isAdmin]);
+  }, []);
+
+  // Use effect with cleanup to prevent memory leaks
+  useEffect(() => {
+    let mounted = true;
+    
+    const loadStats = async () => {
+      await fetchStats();
+      if (!mounted) return;
+    };
+    
+    loadStats();
+    
+    // Cleanup function
+    return () => {
+      mounted = false;
+    };
+  }, [fetchStats]);
 
   if (loading) {
-    return <div className="loading">Loading admin dashboard...</div>;
+    return (
+      <div className="dashboard-loading">
+        <div className="spinner"></div>
+        <p>Loading dashboard...</p>
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="error">{error}</div>;
+    return (
+      <div className="dashboard-error">
+        <i className="fas fa-exclamation-triangle"></i>
+        <p>{error}</p>
+        <button onClick={fetchStats} className="btn-retry">
+          Retry
+        </button>
+      </div>
+    );
   }
 
   return (
-    <div className="admin-dashboard">
+    <div>
       <div className="dashboard-header">
         <h1>Admin Dashboard</h1>
-        <p className="welcome-message">
-          Welcome, <strong>{currentUser?.name}</strong>!
-        </p>
+        <p className="welcome-message">Welcome back, admin! Here's what's happening with your blog.</p>
       </div>
 
-      {stats && (
-        <div className="stats-container">
-          <div className="stat-card">
-            <h3>Total Users</h3>
-            <p className="stat-number">{stats.totalUsers}</p>
-          </div>
-          <div className="stat-card">
-            <h3>Total Posts</h3>
-            <p className="stat-number">{stats.totalPosts}</p>
-          </div>
-          <div className="stat-card">
-            <h3>Total Images</h3>
-            <p className="stat-number">{stats.totalImages || 0}</p>
-          </div>
-          <div className="stat-card">
-            <h3>New Users This Week</h3>
-            <p className="stat-number">{stats.newUsersThisWeek}</p>
-          </div>
-          <div className="stat-card">
-            <h3>New Posts This Week</h3>
-            <p className="stat-number">{stats.newPostsThisWeek}</p>
-          </div>
+      <div className="stats-container">
+        <div className="stat-card">
+          <h3>Total Users</h3>
+          <p className="stat-number">{stats?.totalUsers || 0}</p>
         </div>
-      )}
+        <div className="stat-card">
+          <h3>Total Posts</h3>
+          <p className="stat-number">{stats?.totalPosts || 0}</p>
+        </div>
+        <div className="stat-card">
+          <h3>Total Images</h3>
+          <p className="stat-number">{stats?.totalImages || 0}</p>
+        </div>
+        <div className="stat-card">
+          <h3>New Users This Week</h3>
+          <p className="stat-number">{stats?.newUsersThisWeek || 0}</p>
+        </div>
+        <div className="stat-card">
+          <h3>New Posts This Week</h3>
+          <p className="stat-number">{stats?.newPostsThisWeek || 0}</p>
+        </div>
+      </div>
 
       <div className="admin-actions">
         <h2>Quick Actions</h2>
         <div className="action-buttons">
-          <button onClick={() => navigate('/admin/users')}>
-            Manage Users
-          </button>
-          <button onClick={() => navigate('/admin/posts')}>
-            Manage Blog Posts
-          </button>
-          <button onClick={() => navigate('/admin/create-post')}>
-            Create New Post
-          </button>
+          <Link to="/admin/posts" className="action-button">
+            <i className="fas fa-edit"></i> Create New Post
+          </Link>
+          <Link to="/admin/users" className="action-button">
+            <i className="fas fa-users"></i> Manage Users
+          </Link>
+          <Link to="/" className="action-button" target="_blank" rel="noopener noreferrer">
+            <i className="fas fa-external-link-alt"></i> View Blog
+          </Link>
         </div>
       </div>
     </div>

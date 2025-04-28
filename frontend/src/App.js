@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // Layout components
@@ -53,15 +53,16 @@ const ProtectedRoute = ({ element, requiredRole }) => {
 const AppRoutes = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
-  // Auto-redirect logged in users based on role
+  // Redirect admins to dashboard when they access general pages like home
   useEffect(() => {
-    if (currentUser) {
-      if (currentUser.role === 'admin' && window.location.pathname === '/login') {
+    if (currentUser && currentUser.role === 'admin') {
+      if (location.pathname === '/' || location.pathname === '/login') {
         navigate('/admin/dashboard');
       }
     }
-  }, [currentUser]);
+  }, [currentUser, location.pathname, navigate]);
 
   return (
     <>

@@ -22,12 +22,14 @@ exports.verifyToken = async (req, res, next) => {
     }
     
     try {
-      // Use a different approach to verify the token
-      // First, create a new Supabase client with the session token
-      const authenticatedSupabase = createClient(
+      // Create a new authenticated client with the token
+      const authenticatedClient = createClient(
         process.env.SUPABASE_URL,
         process.env.SUPABASE_ANON_KEY,
         {
+          auth: {
+            persistSession: false,
+          },
           global: {
             headers: {
               Authorization: `Bearer ${token}`
@@ -36,16 +38,11 @@ exports.verifyToken = async (req, res, next) => {
         }
       );
       
-      // Get the current user (will fail if token is invalid)
-      const { data, error } = await authenticatedSupabase.auth.getUser();
+      // Verify the token by getting the user
+      const { data, error } = await authenticatedClient.auth.getUser();
+      
       if (error) {
         console.error("Token verification failed:", error);
-        if (error.message && error.message.includes('Auth session missing')) {
-          return res.status(401).json({ 
-            message: 'Session expired or user logged out. Please login again.', 
-            code: 'SESSION_EXPIRED'
-          });
-        }
         return res.status(401).json({ 
           message: 'Invalid or expired token', 
           error: error.message 
@@ -58,8 +55,8 @@ exports.verifyToken = async (req, res, next) => {
       
       const user = data.user;
       
-      // Get additional user data from our users table
-      const { data: userData, error: userError } = await supabase
+      // Get additional user data from our users table (for the role)
+      const { data: userData, error: userError } = await authenticatedClient
         .from('users')
         .select('id, name, email, role, verified')
         .eq('id', user.id)
@@ -67,48 +64,19 @@ exports.verifyToken = async (req, res, next) => {
         
       if (userError) {
         console.error("User data fetch error:", userError);
-        
-        // If user exists in auth but not in our table, create the record
-        if (userError.code === 'PGRST116') {
-          const { data: newUserData, error: insertError } = await supabase
-            .from('users')
-            .insert([
-              {
-                id: user.id,
-                email: user.email,
-                name: user.user_metadata?.name || 'User',
-                role: 'user',
-                verified: user.email_confirmed_at ? true : false
-              }
-            ])
-            .select()
-            .single();
-            
-          if (insertError) {
-            console.error("User creation error:", insertError);
-            return res.status(500).json({ message: 'Error creating user profile' });
-          }
-          
-          req.user = {
-            id: user.id,
-            email: user.email,
-            name: newUserData.name,
-            role: newUserData.role,
-            verified: newUserData.verified
-          };
-        } else {
-          return res.status(404).json({ message: 'User profile not found' });
-        }
-      } else {
-        // User exists in our table
-        req.user = {
-          id: user.id,
-          email: user.email,
-          name: userData.name,
-          role: userData.role,
-          verified: userData.verified
-        };
+        return res.status(404).json({ message: 'User profile not found' });
       }
+      
+      // Add user details to request
+      req.user = {
+        id: user.id,
+        email: user.email,
+        name: userData.name,
+        role: userData.role,
+        verified: userData.verified
+      };
+      
+      console.log(`Authenticated user: ${req.user.email}, Role: ${req.user.role}`);
       
       next();
     } catch (supabaseError) {

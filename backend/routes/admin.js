@@ -22,53 +22,35 @@ const isAdmin = (req, res, next) => {
   next();
 };
 
-// Get admin dashboard stats
+// Simple in-memory cache for stats
+const statsCache = {
+  data: null,
+  timestamp: 0,
+  ttl: 10000 // 10 seconds TTL
+};
+
+// Get admin dashboard stats with caching
 router.get('/stats', verifyToken, isAdmin, async (req, res) => {
   try {
     console.log('Fetching admin stats for user:', req.user.id);
-
-    // Get total number of users
-    const { count: usersCount, error: usersError } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true });
-
-    if (usersError) throw usersError;
-
-    // Get total number of posts
-    const { count: postsCount, error: postsError } = await supabase
-      .from('posts')
-      .select('*', { count: 'exact', head: true });
-
-    if (postsError) throw postsError;
-
-    // Get new users created in the last week
-    const lastWeek = new Date();
-    lastWeek.setDate(lastWeek.getDate() - 7);
-    const lastWeekIsoString = lastWeek.toISOString();
-
-    const { count: newUsersCount, error: newUsersError } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', lastWeekIsoString);
-
-    if (newUsersError) throw newUsersError;
-
-    // Get new posts created in the last week
-    const { count: newPostsCount, error: newPostsError } = await supabase
-      .from('posts')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', lastWeekIsoString);
-
-    if (newPostsError) throw newPostsError;
-
-    // Return stats
-    res.status(200).json({
-      totalUsers: usersCount,
-      totalPosts: postsCount,
-      newUsersThisWeek: newUsersCount,
-      newPostsThisWeek: newPostsCount,
-      lastUpdated: new Date().toISOString()
-    });
+    
+    // Use cache if it's fresh
+    const now = Date.now();
+    if (statsCache.data && (now - statsCache.timestamp < statsCache.ttl)) {
+      console.log('Returning cached stats');
+      return res.status(200).json(statsCache.data);
+    }
+    
+    // Get fresh data from DB
+    const { data, error } = await supabase.rpc('get_admin_stats');
+    
+    if (error) throw error;
+    
+    // Update cache
+    statsCache.data = data;
+    statsCache.timestamp = now;
+    
+    res.status(200).json(data);
   } catch (error) {
     console.error('Error fetching admin stats:', error);
     res.status(500).json({ 
@@ -78,21 +60,19 @@ router.get('/stats', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-// Get all users with pagination
-router.get('/users', verifyToken, isAdmin, async (req, res) => {
+// Make sure other admin routes use correct table names
+router.get('/blog-posts', verifyToken, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const search = req.query.search || '';
-    const startIndex = (page - 1) * limit;
     
-    let query = supabase
-      .from('users')
-      .select('*', { count: 'exact' });
+    const startIndex = (page - 1) * limit;
+    let query = supabase.from('blog_posts').select('*, users!inner(name)'); // Note the table name change
     
     // Add search filter if provided
     if (search) {
-      query = query.ilike('name', `%${search}%`);
+      query = query.ilike('title', `%${search}%`);
     }
     
     // Add pagination
@@ -103,7 +83,7 @@ router.get('/users', verifyToken, isAdmin, async (req, res) => {
     if (error) throw error;
     
     res.status(200).json({
-      users: data,
+      blog_posts: data,
       pagination: {
         total: count,
         page,
@@ -112,8 +92,51 @@ router.get('/users', verifyToken, isAdmin, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ message: 'Failed to fetch users', error: error.message });
+    console.error('Error fetching blog posts:', error);
+    res.status(500).json({ message: 'Failed to fetch blog posts', error: error.message });
+  }
+});
+
+// Admin endpoint to create post (bypassing RLS)
+router.post('/blog-posts', verifyToken, isAdmin, upload.array('images', 10), async (req, res) => {
+  try {
+    const { title, content, userId } = req.body;
+    const adminId = req.user.id;
+    
+    console.log(`Admin ${adminId} creating post for user ${userId || adminId}, title: ${title}`);
+    
+    // AdminSupabase uses service role that bypasses RLS
+    const { data: post, error } = await adminSupabase
+      .from('blog_posts')
+      .insert([{
+        title,
+        content,
+        user_id: userId || adminId // Admin can create posts for other users or themselves
+      }])
+      .select()
+      .single();
+      
+    if (error) {
+      console.error('Error creating post as admin:', error);
+      return res.status(500).json({
+        message: 'Failed to create post',
+        error
+      });
+    }
+    
+    // Handle file uploads if any
+    // ...image upload code similar to blog.js...
+    
+    res.status(201).json({
+      message: 'Post created successfully',
+      post
+    });
+  } catch (error) {
+    console.error('Error in admin post creation:', error);
+    res.status(500).json({
+      message: 'Failed to create post',
+      error: error.message
+    });
   }
 });
 

@@ -57,18 +57,12 @@ const Login = () => {
     }
     
     try {
-      // Use the login function from AuthContext
-      const response = await login(formData.email, formData.password);
-      
-      // Check user role and redirect accordingly
-      if (response && response.user && response.user.role === 'admin') {
-        navigate('/admin/dashboard');
-      } else {
-        navigate('/'); // Regular users go to home page
-      }
+      // Login is handled by the AuthContext including redirection
+      await login(formData.email, formData.password);
+      // No need for explicit navigation here as it's handled in the login function
     } catch (err) {
-      console.error('Form submission error:', err);
-      // Error is set via the AuthContext
+      // Error is already set in the AuthContext
+      console.error('Login submission error:', err);
     }
   };
 

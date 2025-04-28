@@ -85,8 +85,14 @@ export const AuthProvider = ({ children }) => {
       // Update context
       setCurrentUser(user);
       
-      // Return user data so the Login component can check role
-      return { user, token };
+      // Redirect based on user role
+      if (user.role === 'admin') {
+        navigate('/admin/dashboard');
+      } else {
+        navigate('/');
+      }
+      
+      return response.data;
     } catch (err) {
       console.error('Login error:', err);
       setError(err.response?.data?.message || 'Failed to login. Please try again.');

@@ -1,19 +1,21 @@
 -- Enable UUID extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Drop existing tables if they exist to ensure clean setup
-DROP TABLE IF EXISTS blog_images;
-DROP TABLE IF EXISTS comments;
-DROP TABLE IF EXISTS blog_posts;
-DROP TABLE IF EXISTS users;
+-- Drop existing tables if they exist (with CASCADE to drop dependent objects)
+DROP TABLE IF EXISTS "blog-images" CASCADE;
+DROP TABLE IF EXISTS "blog_images" CASCADE;
+DROP TABLE IF EXISTS comments CASCADE;
+DROP TABLE IF EXISTS "blog-posts" CASCADE;
+DROP TABLE IF EXISTS blog_posts CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
 
--- Create users table - Modified to support Supabase Auth
+-- Create users table (supporting Supabase Auth)
 CREATE TABLE public.users (
-  id UUID PRIMARY KEY, -- Will use the Supabase Auth user ID
+  id UUID PRIMARY KEY, -- Supabase Auth user ID
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL UNIQUE,
   password VARCHAR(255), -- Nullable for Supabase Auth
-  role VARCHAR(50) NOT NULL DEFAULT 'user', -- 'user', 'admin'
+  role VARCHAR(50) NOT NULL DEFAULT 'user', -- 'user' or 'admin'
   verified BOOLEAN DEFAULT false,
   verification_token VARCHAR(255),
   password_reset_token VARCHAR(255),
@@ -21,7 +23,7 @@ CREATE TABLE public.users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create blog_posts table
+-- Create blog_posts table (consistent naming without hyphens)
 CREATE TABLE public.blog_posts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   title VARCHAR(255) NOT NULL,
@@ -31,7 +33,7 @@ CREATE TABLE public.blog_posts (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create blog_images table for storing post images
+-- Create blog_images table (consistent naming without hyphens)
 CREATE TABLE public.blog_images (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   post_id UUID NOT NULL REFERENCES public.blog_posts(id) ON DELETE CASCADE,
@@ -52,16 +54,16 @@ CREATE TABLE public.comments (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Function to update updated_at timestamp
+-- Function to update updated_at automatically
 CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER AS $$ 
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
 $$ language 'plpgsql';
 
--- Triggers for updated_at columns
+-- Triggers for updated_at
 CREATE TRIGGER update_users_updated_at
   BEFORE UPDATE ON public.users
   FOR EACH ROW
@@ -77,7 +79,7 @@ CREATE TRIGGER update_comments_updated_at
   FOR EACH ROW
   EXECUTE PROCEDURE update_updated_at_column();
 
--- Create admin stats function with image counts
+-- Admin stats function
 CREATE OR REPLACE FUNCTION get_admin_stats()
 RETURNS JSON AS $$
 DECLARE
@@ -87,26 +89,16 @@ DECLARE
   new_users_this_week INT;
   new_posts_this_week INT;
 BEGIN
-  -- Count total users
   SELECT COUNT(*) INTO total_users FROM public.users;
-  
-  -- Count total posts
   SELECT COUNT(*) INTO total_posts FROM public.blog_posts;
-  
-  -- Count total images
   SELECT COUNT(*) INTO total_images FROM public.blog_images;
-  
-  -- Count new users in the last 7 days
   SELECT COUNT(*) INTO new_users_this_week 
   FROM public.users 
   WHERE created_at >= NOW() - INTERVAL '7 days';
-  
-  -- Count new posts in the last 7 days
   SELECT COUNT(*) INTO new_posts_this_week 
   FROM public.blog_posts 
   WHERE created_at >= NOW() - INTERVAL '7 days';
   
-  -- Return as JSON
   RETURN json_build_object(
     'totalUsers', total_users,
     'totalPosts', total_posts,
@@ -117,56 +109,96 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Enable RLS on blog_posts and blog_images tables
+-- Enable RLS
 ALTER TABLE public.blog_posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.blog_images ENABLE ROW LEVEL SECURITY;
 
--- Allow authenticated users to insert their own blog posts
-CREATE POLICY "Allow insert for authenticated users on blog_posts"
+-- Clean up any previous policies to avoid conflicts
+DROP POLICY IF EXISTS "Allow insert for users and admin on blog-posts" ON public.blog_posts;
+DROP POLICY IF EXISTS "Allow select for users and admin on blog-posts" ON public.blog_posts;
+DROP POLICY IF EXISTS "Allow insert for users and admin on blog-images" ON public.blog_images;
+DROP POLICY IF EXISTS "Allow select for users and admin on blog-images" ON public.blog_images;
+DROP POLICY IF EXISTS "Allow blog post inserts" ON public.blog_posts;
+DROP POLICY IF EXISTS "Allow blog post reads" ON public.blog_posts;
+DROP POLICY IF EXISTS "Allow blog post updates" ON public.blog_posts;
+DROP POLICY IF EXISTS "Allow blog post deletes" ON public.blog_posts;
+DROP POLICY IF EXISTS "Allow image inserts" ON public.blog_images;
+DROP POLICY IF EXISTS "Allow image reads" ON public.blog_images;
+
+-- Create fresh policies with consistent naming
+-- Policy for blog_posts: insert 
+CREATE POLICY "blog_posts_insert_policy"
   ON public.blog_posts
   FOR INSERT
-  USING (
-    auth.role() = 'authenticated'
-    AND user_id = auth.uid()
+  WITH CHECK (
+    -- Allow service role to bypass all checks
+    auth.role() = 'service_role' 
+    OR 
+    -- Allow admins to insert any post
+    (auth.role() = 'authenticated' AND EXISTS (
+      SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'
+    ))
+    OR 
+    -- Normal user can only post as themselves
+    (auth.role() = 'authenticated' AND user_id = auth.uid())
   );
 
--- Allow authenticated users to insert images
-CREATE POLICY "Allow insert for authenticated users on blog_images"
-  ON public.blog_images
-  FOR INSERT
-  USING (
-    auth.role() = 'authenticated'
-  );
-
--- Allow authenticated users to select their own blog posts
-CREATE POLICY "Allow select for authenticated users on blog_posts"
+-- Policy for blog_posts: select - anyone can read
+CREATE POLICY "blog_posts_select_policy"
   ON public.blog_posts
   FOR SELECT
+  USING (true);
+
+-- Policy for blog_posts: update
+CREATE POLICY "blog_posts_update_policy"
+  ON public.blog_posts
+  FOR UPDATE
   USING (
+    auth.role() = 'service_role'
+    OR
+    (auth.role() = 'authenticated' AND EXISTS (
+      SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'
+    ))
+    OR
+    (auth.role() = 'authenticated' AND user_id = auth.uid())
+  );
+
+-- Policy for blog_posts: delete
+CREATE POLICY "blog_posts_delete_policy"
+  ON public.blog_posts
+  FOR DELETE
+  USING (
+    auth.role() = 'service_role'
+    OR
+    (auth.role() = 'authenticated' AND EXISTS (
+      SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'
+    ))
+    OR
+    (auth.role() = 'authenticated' AND user_id = auth.uid())
+  );
+
+-- Policy for blog_images: insert
+CREATE POLICY "blog_images_insert_policy"
+  ON public.blog_images
+  FOR INSERT
+  WITH CHECK (
+    auth.role() = 'service_role' 
+    OR 
     auth.role() = 'authenticated'
   );
 
--- Allow authenticated users to select images
-CREATE POLICY "Allow select for authenticated users on blog_images"
+-- Policy for blog_images: select - anyone can view
+CREATE POLICY "blog_images_select_policy"
   ON public.blog_images
   FOR SELECT
-  USING (
-    auth.role() = 'authenticated'
-  );
+  USING (true);
 
--- Supabase Storage: Allow authenticated users to upload images
--- (Run this in the Supabase SQL editor if using storage)
-CREATE POLICY "Allow upload for authenticated"
+-- Storage policy - allow uploads for authenticated users
+CREATE POLICY "storage_insert_policy"
   ON storage.objects
   FOR INSERT
-  USING (
+  WITH CHECK (
+    auth.role() = 'service_role' 
+    OR 
     auth.role() = 'authenticated'
   );
-
--- Insert an admin user (you should change the ID to match your Supabase Auth user)
--- Uncomment and modify this after creating your first user
-/*
-UPDATE public.users
-SET role = 'admin'
-WHERE email = 'your-admin-email@example.com';
-*/

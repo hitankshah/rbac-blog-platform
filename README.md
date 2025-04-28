@@ -95,8 +95,8 @@ graph TD
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/rbac-blog.git
-   cd rbac-blog
+   git clone https://github.com/hitankshah/rbac-blog-platform
+   cd rbac-blog-platform
    ```
 
 2. Set up backend environment variables:
@@ -157,7 +157,7 @@ graph TD
    -- Replace with your user's email
    UPDATE public.users
    SET role = 'admin'
-   WHERE email = 'your_email@example.com';
+   WHERE email = 'admin@example.com';
    ```
 
 ## User Roles and Permissions

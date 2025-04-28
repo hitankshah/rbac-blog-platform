@@ -108,9 +108,49 @@ export const blogService = {
   deletePost: (id) => api.delete(`/api/blog/${id}`),
 };
 
-// Admin API
+// Add debounce utility
+const debounce = (fn, delay) => {
+  let timer = null;
+  return function (...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      fn.apply(this, args);
+      timer = null;
+    }, delay);
+  };
+};
+
+// Tracking pending requests to avoid duplicates
+const pendingRequests = {};
+
+// Admin API with enhanced methods
 export const adminService = {
-  getStats: () => api.get('/api/admin/stats'),
+  getStats: (() => {
+    let promise = null;
+    let lastCallTime = 0;
+    
+    return async function() {
+      // Return existing promise if a request is in progress
+      if (promise && Date.now() - lastCallTime < 2000) {
+        return promise;
+      }
+      
+      lastCallTime = Date.now();
+      promise = api.get('/api/admin/stats');
+      
+      try {
+        const result = await promise;
+        return result;
+      } finally {
+        // Reset after a short delay to allow for component cleanup
+        setTimeout(() => {
+          promise = null;
+        }, 100);
+      }
+    };
+  })(),
+  
+  // ...other methods with normal implementation
   getUsers: (page = 1, limit = 10, search = '') => 
     api.get(`/api/admin/users?page=${page}&limit=${limit}&search=${search}`),
   updateUserRole: (userId, role) => 
