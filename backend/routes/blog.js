@@ -5,123 +5,151 @@ const { verifyToken } = require('../middleware/auth');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Initialize Supabase client with anon key (used for public operations)
+// Initialize Supabase clients with logging
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-// Create a service role client for admin operations that bypass RLS
+// Make sure to use service_role key for admin operations
 const adminSupabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
+// Check if storage bucket exists and create if needed
+async function ensureStorageBucketExists() {
+  try {
+    const { data: buckets } = await adminSupabase.storage.listBuckets();
+    const bucketName = 'blog-images';
+    
+    if (!buckets.find(b => b.name === bucketName)) {
+      console.log('Creating blog-images storage bucket');
+      const { error } = await adminSupabase.storage.createBucket(bucketName, {
+        public: true,
+        fileSizeLimit: 10485760 // 10MB
+      });
+      
+      if (error) {
+        console.error('Error creating bucket:', error);
+      }
+    }
+  } catch (err) {
+    console.error('Error checking/creating bucket:', err);
+  }
+}
+
+// Call on server startup
+ensureStorageBucketExists();
+
 // Create a new blog post
 router.post('/', verifyToken, upload.array('images', 10), async (req, res) => {
   try {
-    // Log complete request for debugging
-    console.log('POST /api/blog - Full request body:', req.body);
-    console.log('User from token:', req.user);
+    // Debug request information
+    console.log('2025-04-28 - POST /api/blog');
+    console.log('Request body type:', typeof req.body);
+    console.log('Request Content-Type:', req.get('Content-Type'));
+    console.log('Request body keys:', Object.keys(req.body));
+    console.log('User ID:', req.user?.id);
+    console.log('User role:', req.user?.role);
     console.log('Files received:', req.files?.length || 0);
     
     // Extract data from request
-    const title = req.body.title;
-    const content = req.body.content;
-    const userId = req.user.id;
+    const { title, content } = req.body;
     
+    // Check required fields
     if (!title || !content) {
       return res.status(400).json({ message: 'Title and content are required' });
     }
     
-    console.log('Creating post with title:', title);
-    console.log('For user:', userId);
-    console.log('User role:', req.user.role);
+    // Direct database insert approach with service role client
+    const { data: post, error: insertError } = await adminSupabase
+      .from('blog_posts')
+      .insert({
+        title,
+        content,
+        user_id: req.user.id
+      })
+      .select('*')
+      .single();
     
-    // For admin users, directly use the REST endpoint without RLS
-    if (req.user.role === 'admin') {
-      console.log('Using admin bypass for RLS');
-      
-      // AdminSupabase uses the service role key that bypasses RLS
-      const { data: post, error: postError } = await adminSupabase
-        .from('blog_posts')
-        .insert([{ title, content, user_id: userId }])
-        .select()
-        .single();
-      
-      if (postError) {
-        console.error('Admin post creation error:', postError);
-        return res.status(500).json({ 
-          message: 'Failed to create post as admin',
-          error: postError 
-        });
-      }
-      
-      // Process uploaded files
-      // ...existing image handling code...
-
-      return res.status(201).json({
-        message: 'Post created successfully by admin',
-        post: post
-      });
-    } 
-    // For regular users, use SQL RPC to bypass RLS issues
-    else {
-      console.log('Using regular user flow with RLS');
-      
-      // Try inserting with the regular client first (should work if RLS permits)
-      const { data: post, error: postError } = await supabase
-        .from('blog_posts')
-        .insert([{ title, content, user_id: userId }])
-        .select()
-        .single();
-        
-      if (postError) {
-        console.error('Regular user post creation error:', postError);
-        
-        // If it fails, try using a stored procedure or direct SQL
-        // This would need a stored procedure in your Supabase database
-        // that's authorized to insert posts for authenticated users
-        const { data: rpcPost, error: rpcError } = await supabase.rpc(
-          'create_post_for_user',  // This procedure would need to be created in Supabase
-          { 
-            p_title: title, 
-            p_content: content, 
-            p_user_id: userId 
-          }
-        );
-        
-        if (rpcError) {
-          console.error('RPC post creation error:', rpcError);
-          return res.status(500).json({ 
-            message: 'Failed to create post via RPC',
-            error: rpcError 
-          });
-        }
-        
-        // Process uploaded files
-        // ...existing image handling code...
-
-        return res.status(201).json({
-          message: 'Post created successfully via RPC',
-          post: rpcPost
-        });
-      }
-      
-      // If original insert worked, continue with that post
-      // Process uploaded files
-      // ...existing image handling code...
-
-      return res.status(201).json({
-        message: 'Post created successfully',
-        post: post
+    // Handle insert error
+    if (insertError) {
+      console.error('Database insert error:', insertError);
+      return res.status(500).json({ 
+        message: 'Failed to create post',
+        error: insertError
       });
     }
+    
+    console.log('Post created with ID:', post.id);
+    
+    // Process images if any
+    const uploadedImages = [];
+    if (req.files && req.files.length > 0) {
+      console.log(`Processing ${req.files.length} images`);
+      
+      for (const file of req.files) {
+        const fileExt = file.originalname.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
+        const filePath = `${post.id}/${fileName}`;
+        
+        // Upload file to storage
+        const { data: fileData, error: fileError } = await adminSupabase
+          .storage
+          .from('blog-images')
+          .upload(filePath, file.buffer, {
+            contentType: file.mimetype,
+            upsert: true
+          });
+          
+        if (fileError) {
+          console.error('File upload error:', fileError);
+          continue;
+        }
+        
+        // Get public URL
+        const { data: urlData } = adminSupabase
+          .storage
+          .from('blog-images')
+          .getPublicUrl(filePath);
+        
+        const publicUrl = urlData.publicUrl;
+        
+        // Insert image record
+        const { data: imageData, error: imageError } = await adminSupabase
+          .from('blog_images')
+          .insert({
+            post_id: post.id,
+            file_name: file.originalname,
+            file_path: filePath,
+            url: publicUrl,
+            content_type: file.mimetype
+          })
+          .select()
+          .single();
+          
+        if (imageError) {
+          console.error('Image record error:', imageError);
+          continue;
+        }
+        
+        uploadedImages.push(imageData);
+      }
+    }
+    
+    return res.status(201).json({
+      message: 'Post created successfully',
+      post: {
+        ...post,
+        images: uploadedImages
+      }
+    });
   } catch (error) {
-    console.error('Error in post creation:', error);
-    res.status(500).json({ 
-      message: 'Failed to create blog post',
-      error: error.message || error
+    console.error('Unhandled error in post creation:', error);
+    return res.status(500).json({
+      message: 'An unexpected error occurred',
+      error: error.message || String(error)
     });
   }
 });

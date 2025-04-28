@@ -109,38 +109,66 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Enable RLS
+-- ==================== ROW LEVEL SECURITY SETUP ====================
+
+-- Enable RLS on tables
 ALTER TABLE public.blog_posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.blog_images ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
+
+-- Ensure service_role can bypass RLS (THIS IS CRITICAL)
+ALTER ROLE service_role BYPASSRLS;
 
 -- Clean up any previous policies to avoid conflicts
-DROP POLICY IF EXISTS "Allow insert for users and admin on blog-posts" ON public.blog_posts;
-DROP POLICY IF EXISTS "Allow select for users and admin on blog-posts" ON public.blog_posts;
-DROP POLICY IF EXISTS "Allow insert for users and admin on blog-images" ON public.blog_images;
-DROP POLICY IF EXISTS "Allow select for users and admin on blog-images" ON public.blog_images;
-DROP POLICY IF EXISTS "Allow blog post inserts" ON public.blog_posts;
-DROP POLICY IF EXISTS "Allow blog post reads" ON public.blog_posts;
-DROP POLICY IF EXISTS "Allow blog post updates" ON public.blog_posts;
-DROP POLICY IF EXISTS "Allow blog post deletes" ON public.blog_posts;
-DROP POLICY IF EXISTS "Allow image inserts" ON public.blog_images;
-DROP POLICY IF EXISTS "Allow image reads" ON public.blog_images;
+DROP POLICY IF EXISTS "Allow service role full access on blog_posts" ON public.blog_posts;
+DROP POLICY IF EXISTS "Allow service role full access on blog_images" ON public.blog_images;
+DROP POLICY IF EXISTS "Allow service role full access on comments" ON public.comments;
 
--- Create fresh policies with consistent naming
+DROP POLICY IF EXISTS "blog_posts_insert_policy" ON public.blog_posts;
+DROP POLICY IF EXISTS "blog_posts_select_policy" ON public.blog_posts;
+DROP POLICY IF EXISTS "blog_posts_update_policy" ON public.blog_posts;
+DROP POLICY IF EXISTS "blog_posts_delete_policy" ON public.blog_posts;
+
+DROP POLICY IF EXISTS "blog_images_insert_policy" ON public.blog_images;
+DROP POLICY IF EXISTS "blog_images_select_policy" ON public.blog_images;
+
+DROP POLICY IF EXISTS "comments_insert_policy" ON public.comments;
+DROP POLICY IF EXISTS "comments_select_policy" ON public.comments;
+DROP POLICY IF EXISTS "comments_update_policy" ON public.comments;
+DROP POLICY IF EXISTS "comments_delete_policy" ON public.comments;
+
+-- Create explicit SERVICE ROLE policies (makes service role bypass explicit)
+-- Blog posts service role policies
+CREATE POLICY "Allow service role full access on blog_posts" 
+  ON public.blog_posts
+  FOR ALL 
+  TO service_role
+  USING (true) 
+  WITH CHECK (true);
+
+-- Blog images service role policies
+CREATE POLICY "Allow service role full access on blog_images" 
+  ON public.blog_images 
+  FOR ALL 
+  TO service_role
+  USING (true) 
+  WITH CHECK (true);
+
+-- Comments service role policies
+CREATE POLICY "Allow service role full access on comments" 
+  ON public.comments 
+  FOR ALL 
+  TO service_role
+  USING (true) 
+  WITH CHECK (true);
+
 -- Policy for blog_posts: insert 
 CREATE POLICY "blog_posts_insert_policy"
   ON public.blog_posts
   FOR INSERT
   WITH CHECK (
-    -- Allow service role to bypass all checks
-    auth.role() = 'service_role' 
-    OR 
-    -- Allow admins to insert any post
-    (auth.role() = 'authenticated' AND EXISTS (
-      SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'
-    ))
-    OR 
-    -- Normal user can only post as themselves
-    (auth.role() = 'authenticated' AND user_id = auth.uid())
+    -- Allow authenticated users to insert their own posts
+    auth.role() = 'authenticated' AND user_id = auth.uid()
   );
 
 -- Policy for blog_posts: select - anyone can read
@@ -149,56 +177,100 @@ CREATE POLICY "blog_posts_select_policy"
   FOR SELECT
   USING (true);
 
--- Policy for blog_posts: update
+-- Policy for blog_posts: update - users can update their own posts
 CREATE POLICY "blog_posts_update_policy"
   ON public.blog_posts
   FOR UPDATE
-  USING (
-    auth.role() = 'service_role'
-    OR
-    (auth.role() = 'authenticated' AND EXISTS (
-      SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'
-    ))
-    OR
-    (auth.role() = 'authenticated' AND user_id = auth.uid())
-  );
+  USING (auth.uid() = user_id);
 
--- Policy for blog_posts: delete
+-- Policy for blog_posts: delete - users can delete their own posts
 CREATE POLICY "blog_posts_delete_policy"
   ON public.blog_posts
   FOR DELETE
-  USING (
-    auth.role() = 'service_role'
-    OR
-    (auth.role() = 'authenticated' AND EXISTS (
-      SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'
-    ))
-    OR
-    (auth.role() = 'authenticated' AND user_id = auth.uid())
-  );
+  USING (auth.uid() = user_id);
 
--- Policy for blog_images: insert
+-- Policy for blog_images: insert - users can add images to their own posts
 CREATE POLICY "blog_images_insert_policy"
   ON public.blog_images
   FOR INSERT
   WITH CHECK (
-    auth.role() = 'service_role' 
-    OR 
-    auth.role() = 'authenticated'
+    EXISTS (
+      SELECT 1 FROM public.blog_posts
+      WHERE id = post_id AND user_id = auth.uid()
+    )
   );
 
--- Policy for blog_images: select - anyone can view
+-- Policy for blog_images: select - anyone can view images
 CREATE POLICY "blog_images_select_policy"
   ON public.blog_images
   FOR SELECT
   USING (true);
 
--- Storage policy - allow uploads for authenticated users
-CREATE POLICY "storage_insert_policy"
-  ON storage.objects
+-- Comment policies
+CREATE POLICY "comments_insert_policy"
+  ON public.comments
   FOR INSERT
-  WITH CHECK (
-    auth.role() = 'service_role' 
-    OR 
-    auth.role() = 'authenticated'
-  );
+  WITH CHECK (auth.uid() = user_id);
+  
+CREATE POLICY "comments_select_policy"
+  ON public.comments
+  FOR SELECT
+  USING (true);
+
+CREATE POLICY "comments_update_policy"
+  ON public.comments
+  FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "comments_delete_policy"
+  ON public.comments
+  FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Storage bucket policies
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT FROM pg_catalog.pg_tables 
+    WHERE schemaname = 'storage' 
+    AND tablename = 'objects'
+  ) THEN
+    BEGIN
+      -- Drop any existing policies
+      DROP POLICY IF EXISTS "Allow storage access" ON storage.objects;
+      
+      -- Create policy for storage
+      CREATE POLICY "Allow storage access"
+        ON storage.objects
+        FOR ALL
+        TO authenticated, service_role
+        USING (true)
+        WITH CHECK (true);
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'Error setting storage policies: %', SQLERRM;
+    END;
+  END IF;
+END $$;
+
+-- Create blog-images bucket if it doesn't exist
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT FROM pg_catalog.pg_tables 
+    WHERE schemaname = 'storage' 
+    AND tablename = 'buckets'
+  ) THEN
+    BEGIN
+      INSERT INTO storage.buckets (id, name) 
+      VALUES ('blog-images', 'Blog Images Bucket')
+      ON CONFLICT DO NOTHING;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'Error creating storage bucket: %', SQLERRM;
+    END;
+  END IF;
+END $$;
+
+-- Grant necessary privileges to service_role
+GRANT ALL ON public.blog_posts TO service_role;
+GRANT ALL ON public.blog_images TO service_role;
+GRANT ALL ON public.comments TO service_role;

@@ -12,7 +12,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Body parsers
+// Body parsers - important for handling multipart form data correctly
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -26,6 +26,14 @@ app.use((req, res, next) => {
     console.log(`Request body keys: ${JSON.stringify(Object.keys(req.body))}`);
   } else {
     console.log(`Request body is empty or undefined`);
+  }
+  
+  // Log environment check for debugging
+  if (req.url === '/api/blog' && req.method === 'POST') {
+    console.log('Environment check for blog post:');
+    console.log('- SUPABASE_URL:', process.env.SUPABASE_URL ? '✓ Set' : '✗ Missing');
+    console.log('- SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? '✓ Set' : '✗ Missing');
+    console.log('- SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✓ Set' : '✗ Missing');
   }
   
   next();
@@ -45,7 +53,13 @@ app.use('/api/blog', blogRoutes);
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
     status: 'ok',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    env: {
+      node: process.version,
+      supabaseUrl: process.env.SUPABASE_URL ? '✓ Set' : '✗ Missing',
+      supabaseAnonKey: process.env.SUPABASE_ANON_KEY ? '✓ Set' : '✗ Missing',
+      supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY ? '✓ Set' : '✗ Missing'
+    }
   });
 });
 
@@ -55,26 +69,27 @@ app.use((req, res) => {
   res.status(404).json({ message: 'Not Found' });
 });
 
-// Error handler
+// Global error handler with detailed error information
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
+  console.error('Unhandled server error:', err);
   
-  // Handle Supabase auth errors
-  if (err.__isAuthError) {
-    return res.status(401).json({
-      message: 'Authentication error: ' + (err.message || 'Invalid token'),
-      code: err.code || 'AUTH_ERROR'
-    });
+  const errorResponse = {
+    message: err.message || 'Internal Server Error',
+    status: err.status || 500
+  };
+  
+  // Include more details in non-production environments
+  if (process.env.NODE_ENV !== 'production') {
+    errorResponse.stack = err.stack;
+    errorResponse.detail = err.detail || err.error || err.data;
   }
   
-  res.status(err.status || 500).json({
-    message: err.message || 'Internal Server Error',
-    code: err.code
-  });
+  res.status(errorResponse.status).json(errorResponse);
 });
 
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Health check available at http://localhost:${PORT}/api/health`);
 });

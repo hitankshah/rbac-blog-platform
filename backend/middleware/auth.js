@@ -1,9 +1,15 @@
 const { createClient } = require('@supabase/supabase-js');
 
-// Initialize Supabase client
+// Initialize Supabase client with anon key
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
+);
+
+// Initialize admin client with service role key to bypass RLS
+const adminSupabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
 exports.verifyToken = async (req, res, next) => {
@@ -21,72 +27,83 @@ exports.verifyToken = async (req, res, next) => {
       return res.status(401).json({ message: 'Authentication required: Invalid token format' });
     }
     
+    // For debugging
+    console.log('Verifying token for request:', req.method, req.originalUrl);
+    
     try {
-      // Create a new authenticated client with the token
-      const authenticatedClient = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          auth: {
-            persistSession: false,
-          },
-          global: {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        }
-      );
-      
-      // Verify the token by getting the user
-      const { data, error } = await authenticatedClient.auth.getUser();
+      // Use the adminSupabase client to verify the token
+      const { data, error } = await supabase.auth.getUser(token);
       
       if (error) {
-        console.error("Token verification failed:", error);
-        return res.status(401).json({ 
-          message: 'Invalid or expired token', 
-          error: error.message 
+        console.error('Token verification error:', error);
+        return res.status(401).json({
+          message: 'Invalid or expired token',
+          error: error.message
         });
       }
       
-      if (!data.user) {
-        return res.status(401).json({ message: 'User not found' });
+      if (!data || !data.user) {
+        return res.status(401).json({ message: 'User not found for token' });
       }
       
       const user = data.user;
       
-      // Get additional user data from our users table (for the role)
-      const { data: userData, error: userError } = await authenticatedClient
+      // For debugging
+      console.log('User found for token:', user.id);
+      
+      // Get user details from the database
+      const { data: userData, error: userError } = await adminSupabase
         .from('users')
-        .select('id, name, email, role, verified')
+        .select('*')
         .eq('id', user.id)
         .single();
-        
+      
       if (userError) {
-        console.error("User data fetch error:", userError);
-        return res.status(404).json({ message: 'User profile not found' });
+        console.error('Error fetching user data:', userError);
+        
+        // If user doesn't exist in our database, create one
+        if (userError.code === 'PGRST116') {
+          const { data: newUser, error: createError } = await adminSupabase
+            .from('users')
+            .insert([{
+              id: user.id,
+              name: user.user_metadata?.name || 'User',
+              email: user.email,
+              role: 'user',
+              verified: user.email_confirmed_at ? true : false
+            }])
+            .select()
+            .single();
+          
+          if (createError) {
+            console.error('Error creating user:', createError);
+            return res.status(500).json({ message: 'Error setting up user profile' });
+          }
+          
+          req.user = newUser;
+        } else {
+          return res.status(500).json({ message: 'Error fetching user profile' });
+        }
+      } else {
+        req.user = userData;
       }
       
-      // Add user details to request
-      req.user = {
-        id: user.id,
-        email: user.email,
-        name: userData.name,
-        role: userData.role,
-        verified: userData.verified
-      };
-      
-      console.log(`Authenticated user: ${req.user.email}, Role: ${req.user.role}`);
+      // For debugging
+      console.log('User role:', req.user.role);
       
       next();
     } catch (supabaseError) {
-      console.error('Supabase auth error:', supabaseError);
-      return res.status(401).json({ message: 'Authentication error', error: supabaseError.message });
+      console.error('Error in Supabase auth:', supabaseError);
+      return res.status(500).json({
+        message: 'Authentication service error',
+        error: supabaseError.message
+      });
     }
   } catch (error) {
     console.error('Auth middleware error:', error);
-    return res.status(error.status || 500).json({ 
-      message: error.message || 'Authentication failed'
+    return res.status(500).json({
+      message: 'Authentication error',
+      error: error.message || String(error)
     });
   }
 };
