@@ -19,8 +19,8 @@ api.interceptors.request.use(
     } else {
       // Prevent sending requests that require auth if token is missing
       if (
-        config.url.startsWith('/api/auth/me') ||
-        config.url.startsWith('/api/admin/')
+        config.url.startsWith('/auth/me') ||
+        config.url.startsWith('/admin/')
       ) {
         throw new axios.Cancel('No auth token, request cancelled');
       }
@@ -59,7 +59,7 @@ api.interceptors.response.use(
       
       // If unauthorized due to invalid token, trigger logout
       if (error.response.status === 401 && 
-          (error.config.url.includes('/api/auth/me') || error.config.url.includes('/api/admin/'))) {
+          (error.config.url.includes('/auth/me') || error.config.url.includes('/admin/'))) {
         console.log('Session invalid, logging out');
         
         // Clear local storage
@@ -82,36 +82,36 @@ api.interceptors.response.use(
 
 // Auth API
 export const authService = {
-  login: (email, password) => api.post('/api/auth/login', { email, password }),
+  login: (email, password) => api.post('/auth/login', { email, password }),
   
   register: (userData) => {
     // Ensure userData is correctly formatted
     console.log('Register payload:', userData);
-    return api.post('/api/auth/register', userData);
+    return api.post('/auth/register', userData);
   },
-  getCurrentUser: () => api.get('/api/auth/me'),
-  sendVerification: (email) => api.post('/api/auth/send-verification', { email }),
-  resetPassword: (email) => api.post('/api/auth/reset-password', { email }),
-  confirmResetPassword: (token, password) => api.post('/api/auth/reset-password/confirm', { token, password }),
-  logout: () => api.post('/api/auth/logout'),
-  verifyToken: (token) => api.post('/api/auth/verify-token', { token }),
+  getCurrentUser: () => api.get('/auth/me'),
+  sendVerification: (email) => api.post('/auth/send-verification', { email }),
+  resetPassword: (email) => api.post('/auth/reset-password', { email }),
+  confirmResetPassword: (token, password) => api.post('/auth/reset-password/confirm', { token, password }),
+  logout: () => api.post('/auth/logout'),
+  verifyToken: (token) => api.post('/auth/verify-token', { token }),
 };
 
 // Blog API
 export const blogService = {
   // Changed from getAllPosts to getPosts to be consistent
   getPosts: (page = 1, limit = 10, search = '') => 
-    api.get(`/api/blog?page=${page}&limit=${limit}&search=${search}`),
-  getPost: (id) => api.get(`/api/blog/${id}`),
+    api.get(`/blog?page=${page}&limit=${limit}&search=${search}`),
+  getPost: (id) => api.get(`/blog/${id}`),
   createPost: (postData) => {
     // We don't need to manually set config here as the interceptor handles FormData
-    return api.post('/api/blog', postData);
+    return api.post('/blog', postData);
   },
   updatePost: (id, postData) => {
     // We don't need to manually set config here as the interceptor handles FormData
-    return api.put(`/api/blog/${id}`, postData);
+    return api.put(`/blog/${id}`, postData);
   },
-  deletePost: (id) => api.delete(`/api/blog/${id}`),
+  deletePost: (id) => api.delete(`/blog/${id}`),
 };
 
 // Add debounce utility
@@ -142,7 +142,7 @@ export const adminService = {
       }
       
       lastCallTime = Date.now();
-      promise = api.get('/api/admin/stats');
+      promise = api.get('/admin/stats');
       
       try {
         const result = await promise;
@@ -158,13 +158,13 @@ export const adminService = {
   
   // ...other methods with normal implementation
   getUsers: (page = 1, limit = 10, search = '') => 
-    api.get(`/api/admin/users?page=${page}&limit=${limit}&search=${search}`),
+    api.get(`/admin/users?page=${page}&limit=${limit}&search=${search}`),
   updateUserRole: (userId, role) => 
-    api.patch(`/api/admin/users/${userId}/role`, { role }),
-  deleteUser: (userId) => api.delete(`/api/admin/users/${userId}`),
-  createAdmin: (userData) => api.post('/api/admin/create-admin', userData),
+    api.patch(`/admin/users/${userId}/role`, { role }),
+  deleteUser: (userId) => api.delete(`/admin/users/${userId}`),
+  createAdmin: (userData) => api.post('/admin/create-admin', userData),
   getPosts: (page = 1, limit = 10, search = '') => 
-    api.get(`/api/admin/blog-posts?page=${page}&limit=${limit}&search=${search}`),
+    api.get(`/admin/blog-posts?page=${page}&limit=${limit}&search=${search}`),
 };
 
 // For backwards compatibility, also export the services under the names used before
