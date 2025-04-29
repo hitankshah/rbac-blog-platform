@@ -39,5 +39,5 @@
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5"
   },
-  "proxy": "https://rbac-blog-platform.onrender.com"
+  "proxy": "https://rbac-blog-backend.onrender.com"
 }

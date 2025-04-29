@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://rbac-blog-platform.onrender.com';
+const API_URL = process.env.REACT_APP_API_URL || 'https://rbac-blog-backend.onrender.com';
 
 // Create an axios instance with default config
 const api = axios.create({
