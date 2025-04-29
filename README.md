@@ -1,7 +1,12 @@
 # RBAC Blog Application
 
 A full-featured blog platform with role-based access control (RBAC) built with React, Node.js, Express, and Supabase.
-
+## admin login
+email -admin@admin.com
+password- admin
+## live deployment 
+frontend -https://rbac-blog-frontend.onrender.com
+backend-https://rbac-blog-backend.onrender.com
 ## Architecture Overview
 
 ```mermaid
