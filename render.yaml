@@ -46,6 +46,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 10000
       - key: REACT_APP_SUPABASE_URL
         sync: false
       - key: REACT_APP_SUPABASE_ANON_KEY
