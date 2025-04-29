@@ -27,7 +27,7 @@ const AdminUsers = () => {
       }
 
       const response = await axios.get(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/admin/users`,
+        `${process.env.REACT_APP_API_URL || 'https://rbac-backend.onrender.com'}/api/admin/users`,
         {
           headers: { Authorization: `Bearer ${token}` },
           params: { page: pagination.page, limit: pagination.limit, search }
@@ -63,7 +63,7 @@ const AdminUsers = () => {
       const token = localStorage.getItem('token');
       
       await axios.patch(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/admin/users/${userId}/role`,
+        `${process.env.REACT_APP_API_URL || 'https://rbac-backend.onrender.com'}/api/admin/users/${userId}/role`,
         { role: newRole },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -90,7 +90,7 @@ const AdminUsers = () => {
       const token = localStorage.getItem('token');
       
       await axios.delete(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/admin/users/${userId}`,
+        `${process.env.REACT_APP_API_URL || 'https://rbac-backend.onrender.com'}/api/admin/users/${userId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -120,7 +120,7 @@ const AdminUsers = () => {
       const token = localStorage.getItem('token');
       
       await axios.post(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/admin/create-admin`,
+        `${process.env.REACT_APP_API_URL || 'https://rbac-backend.onrender.com'}/api/admin/create-admin`,
         newAdminForm,
         { headers: { Authorization: `Bearer ${token}` } }
       );

@@ -33,7 +33,9 @@ graph TD
         SupabaseDB --> BlogImages[Blog Images Table]
     end
 ```
-
+## admin
+email-admin@admin.com
+password - admin
 ## Application Routes
 
 ### Frontend Routes
