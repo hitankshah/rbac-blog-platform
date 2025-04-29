@@ -12,7 +12,7 @@ const Login = () => {
   const navigate = useNavigate();
   
   // API base URL
-  const API_URL = 'https://rbac-backend.onrender.com';
+  const API_URL = 'https://rbac-blog-platform.onrender.com';
 
   const onChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });

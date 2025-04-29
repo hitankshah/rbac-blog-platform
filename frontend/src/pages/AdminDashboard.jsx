@@ -42,7 +42,7 @@ const AdminDashboard = () => {
       setLoading(true);
       try {
         const response = await axios.get(
-          `${process.env.REACT_APP_API_URL || 'https://rbac-backend.onrender.com'}/api/admin/stats`,
+          `${process.env.REACT_APP_API_URL || 'https://rbac-blog-platform.onrender.com'}/api/admin/stats`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
