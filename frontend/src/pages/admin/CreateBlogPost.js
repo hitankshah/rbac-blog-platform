@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../../services/api';
+import api, { blogService } from '../../services/api';
 import './BlogForm.css';
 
 const CreateBlogPost = () => {
@@ -8,8 +8,11 @@ const CreateBlogPost = () => {
     title: '',
     content: ''
   });
+  const [images, setImages] = useState([]);
+  const [previewImages, setPreviewImages] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -18,6 +21,37 @@ const CreateBlogPost = () => {
       ...prev,
       [name]: value
     }));
+  };
+
+  const handleImageChange = (e) => {
+    const files = Array.from(e.target.files);
+    setImages(prev => [...prev, ...files]);
+    
+    // Create preview URLs for the images
+    const newPreviewImages = files.map(file => ({
+      id: Math.random().toString(36).substring(2),
+      url: URL.createObjectURL(file),
+      name: file.name,
+      size: file.size
+    }));
+    
+    setPreviewImages(prev => [...prev, ...newPreviewImages]);
+  };
+
+  const removeImage = (id) => {
+    const imageIndex = previewImages.findIndex(img => img.id === id);
+    if (imageIndex === -1) return;
+    
+    // Release the object URL to avoid memory leaks
+    URL.revokeObjectURL(previewImages[imageIndex].url);
+    
+    // Remove from preview and file arrays
+    setPreviewImages(previewImages.filter(img => img.id !== id));
+    setImages(prevImages => {
+      const newImages = [...prevImages];
+      newImages.splice(imageIndex, 1);
+      return newImages;
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -33,10 +67,25 @@ const CreateBlogPost = () => {
     
     try {
       setLoading(true);
-      const response = await api.post('/blog', { title, content });
-      navigate(`/blog/${response.id}`);
+      
+      // Create FormData for multipart/form-data request
+      const formDataObj = new FormData();
+      formDataObj.append('title', title);
+      formDataObj.append('content', content);
+      
+      // Add images if any
+      images.forEach(image => {
+        formDataObj.append('images', image);
+      });
+      
+      // Use blogService instead of direct api call
+      const response = await blogService.createPost(formDataObj);
+      
+      // Navigate to the new post
+      navigate(`/blog/${response.data.id}`);
     } catch (err) {
-      setError(err.message || 'Failed to create blog post');
+      console.error('Error creating post:', err);
+      setError(err.response?.data?.message || 'Failed to create blog post');
       setLoading(false);
     }
   };
@@ -74,6 +123,50 @@ const CreateBlogPost = () => {
           />
         </div>
         
+        <div className="form-group">
+          <label>Images</label>
+          <div className="image-upload-container">
+            <input
+              type="file"
+              id="images"
+              name="images"
+              onChange={handleImageChange}
+              multiple
+              accept="image/*"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+            />
+            <button
+              type="button"
+              className="upload-btn"
+              onClick={() => fileInputRef.current.click()}
+            >
+              <i className="fas fa-cloud-upload-alt"></i> Add Images
+            </button>
+            
+            {previewImages.length > 0 && (
+              <div className="image-preview-container">
+                {previewImages.map((img) => (
+                  <div key={img.id} className="image-preview">
+                    <img src={img.url} alt={img.name} />
+                    <div className="image-info">
+                      <div className="image-name">{img.name}</div>
+                      <div className="image-size">{(img.size / 1024).toFixed(1)} KB</div>
+                    </div>
+                    <button
+                      type="button"
+                      className="remove-image-btn"
+                      onClick={() => removeImage(img.id)}
+                    >
+                      <i className="fas fa-times"></i>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        
         <div className="form-buttons">
           <button
             type="button"
@@ -87,7 +180,11 @@ const CreateBlogPost = () => {
             disabled={loading}
             className="btn primary"
           >
-            {loading ? 'Creating...' : 'Create Post'}
+            {loading ? (
+              <><i className="fas fa-spinner fa-spin"></i> Creating...</>
+            ) : (
+              <>Create Post</>
+            )}
           </button>
         </div>
       </form>

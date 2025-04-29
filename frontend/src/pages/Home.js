@@ -49,7 +49,7 @@ const Home = () => {
         <p>Discover insightful articles and share your thoughts</p>
         
         {currentUser?.role === 'admin' && (
-          <Link to="/admin/blogs/create" className="btn create-post-btn">
+          <Link to="/admin/posts" className="btn create-post-btn">
             Create New Post
           </Link>
         )}
@@ -61,10 +61,25 @@ const Home = () => {
         {posts.length > 0 ? (
           posts.map(post => (
             <div key={post.id} className="post-card">
+              {/* Display the first image if available */}
+              {post.images && post.images.length > 0 && (
+                <div className="post-image-container">
+                  <img 
+                    src={post.images[0].url} 
+                    alt={`Featured for ${post.title}`} 
+                    className="post-featured-image"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
+              
               <h2 className="post-title">{post.title}</h2>
               
               <div className="post-meta">
-                <span className="post-author">By: {post.author.name}</span>
+                <span className="post-author">By: {post.users?.name || 'Unknown'}</span>
                 <span className="post-date">
                   {new Date(post.created_at).toLocaleDateString()}
                 </span>
@@ -73,6 +88,27 @@ const Home = () => {
               <div className="post-excerpt">
                 {post.content.substring(0, 150)}...
               </div>
+              
+              {/* Display small thumbnails if there are multiple images */}
+              {post.images && post.images.length > 1 && (
+                <div className="post-thumbnails">
+                  {post.images.slice(1, 4).map((image, index) => (
+                    <img 
+                      key={image.id} 
+                      src={image.url} 
+                      alt={`Thumbnail ${index + 1}`}
+                      className="post-thumbnail" 
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  ))}
+                  {post.images.length > 4 && (
+                    <div className="more-images">+{post.images.length - 4}</div>
+                  )}
+                </div>
+              )}
               
               <div className="post-footer">
                 <Link to={`/blog/${post.id}`} className="read-more">

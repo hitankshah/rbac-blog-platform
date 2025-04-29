@@ -40,7 +40,10 @@ const AdminLayout = () => {
           <Link to="/admin/dashboard" className={`nav-item ${isActive('/admin/dashboard')}`}>
             <i className="fas fa-tachometer-alt"></i> Dashboard
           </Link>
-          <Link to="/admin/posts" className={`nav-item ${isActive('/admin/posts')}`}>
+          <Link to="/admin/blogs" className={`nav-item ${isActive('/admin/blogs')}`}>
+            <i className="fas fa-newspaper"></i> Manage Posts
+          </Link>
+          <Link to="/admin/blogs/create" className={`nav-item ${isActive('/admin/blogs/create')}`}>
             <i className="fas fa-edit"></i> Create Post
           </Link>
           <Link to="/admin/users" className={`nav-item ${isActive('/admin/users')}`}>

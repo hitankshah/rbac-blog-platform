@@ -27,7 +27,11 @@ import Profile from './components/user/Profile';
 import AdminLayout from './components/admin/AdminLayout';
 import Dashboard from './components/admin/Dashboard';
 import UserManagement from './components/admin/UserManagement';
-import PostForm from './components/admin/PostForm';
+
+// Blog management pages
+import BlogManagement from './pages/admin/BlogManagement';
+import CreateBlogPost from './pages/admin/CreateBlogPost';
+import EditBlogPost from './pages/admin/EditBlogPost';
 
 // Protected route component
 const ProtectedRoute = ({ element, requiredRole }) => {
@@ -93,8 +97,12 @@ const AppRoutes = () => {
           >
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="users" element={<UserManagement />} />
-            <Route path="posts" element={<PostForm />} />
-            <Route path="posts/:id" element={<PostForm />} />
+            
+            {/* Blog Management Routes */}
+            <Route path="blogs" element={<BlogManagement />} />
+            <Route path="blogs/create" element={<CreateBlogPost />} />
+            <Route path="blogs/edit/:id" element={<EditBlogPost />} />
+            
             {/* Default redirect for /admin */}
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
           </Route>

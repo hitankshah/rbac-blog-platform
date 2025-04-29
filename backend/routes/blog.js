@@ -1,52 +1,29 @@
 const express = require('express');
 const router = express.Router();
-const { createClient } = require('@supabase/supabase-js');
 const { verifyToken } = require('../middleware/auth');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
+const { 
+  supabase,
+  adminSupabase, 
+  uploadFileToStorage, 
+  ensureBucketExists 
+} = require('../utils/storageConfig');
 
-// Initialize Supabase clients with logging
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
-// Make sure to use service_role key for admin operations
-const adminSupabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
-
-// Check if storage bucket exists and create if needed
-async function ensureStorageBucketExists() {
-  try {
-    const { data: buckets } = await adminSupabase.storage.listBuckets();
-    const bucketName = 'blog-images';
-    
-    if (!buckets.find(b => b.name === bucketName)) {
-      console.log('Creating blog-images storage bucket');
-      const { error } = await adminSupabase.storage.createBucket(bucketName, {
-        public: true,
-        fileSizeLimit: 10485760 // 10MB
-      });
-      
-      if (error) {
-        console.error('Error creating bucket:', error);
-      }
-    }
-  } catch (err) {
-    console.error('Error checking/creating bucket:', err);
+// Initialize the storage bucket on server startup
+ensureBucketExists().then(success => {
+  if (success) {
+    console.log('Storage bucket ready for use');
+  } else {
+    console.error('Failed to ensure storage bucket exists, uploads may not work correctly');
   }
-}
-
-// Call on server startup
-ensureStorageBucketExists();
+});
 
 // Create a new blog post
 router.post('/', verifyToken, upload.array('images', 10), async (req, res) => {
   try {
     // Debug request information
-    console.log('2025-04-28 - POST /api/blog');
+    console.log('POST /api/blog');
     console.log('Request body type:', typeof req.body);
     console.log('Request Content-Type:', req.get('Content-Type'));
     console.log('Request body keys:', Object.keys(req.body));
@@ -90,51 +67,36 @@ router.post('/', verifyToken, upload.array('images', 10), async (req, res) => {
       console.log(`Processing ${req.files.length} images`);
       
       for (const file of req.files) {
-        const fileExt = file.originalname.split('.').pop();
-        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-        const filePath = `${post.id}/${fileName}`;
-        
-        // Upload file to storage
-        const { data: fileData, error: fileError } = await adminSupabase
-          .storage
-          .from('blog-images')
-          .upload(filePath, file.buffer, {
-            contentType: file.mimetype,
-            upsert: true
-          });
+        try {
+          const fileExt = file.originalname.split('.').pop();
+          const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
+          const filePath = `${post.id}/${fileName}`;
           
-        if (fileError) {
-          console.error('File upload error:', fileError);
-          continue;
-        }
-        
-        // Get public URL
-        const { data: urlData } = adminSupabase
-          .storage
-          .from('blog-images')
-          .getPublicUrl(filePath);
-        
-        const publicUrl = urlData.publicUrl;
-        
-        // Insert image record
-        const { data: imageData, error: imageError } = await adminSupabase
-          .from('blog_images')
-          .insert({
-            post_id: post.id,
-            file_name: file.originalname,
-            file_path: filePath,
-            url: publicUrl,
-            content_type: file.mimetype
-          })
-          .select()
-          .single();
+          // Use the utility function to upload the file
+          const imageData = await uploadFileToStorage(file, filePath);
           
-        if (imageError) {
-          console.error('Image record error:', imageError);
-          continue;
+          // Insert image record in database
+          const { data: dbImage, error: imageError } = await adminSupabase
+            .from('blog_images')
+            .insert({
+              post_id: post.id,
+              file_name: file.originalname,
+              file_path: filePath,
+              url: imageData.url,
+              content_type: file.mimetype
+            })
+            .select()
+            .single();
+            
+          if (imageError) {
+            console.error('Image database record error:', imageError);
+            continue;
+          }
+          
+          uploadedImages.push(dbImage);
+        } catch (fileError) {
+          console.error('Error processing file:', fileError);
         }
-        
-        uploadedImages.push(imageData);
       }
     }
     
@@ -265,6 +227,23 @@ router.put('/:id', verifyToken, upload.array('images', 10), async (req, res) => 
     const { id } = req.params;
     const { title, content } = req.body;
     const userId = req.user.id;
+    let imagesToDelete = [];
+    
+    // Check if there are images to delete
+    if (req.body.imagesToDelete) {
+      try {
+        imagesToDelete = JSON.parse(req.body.imagesToDelete);
+        if (!Array.isArray(imagesToDelete)) {
+          imagesToDelete = [];
+        }
+      } catch (e) {
+        console.error('Error parsing imagesToDelete:', e);
+      }
+    }
+    
+    console.log(`PUT /blog/${id} - Update post`);
+    console.log('Images to delete:', imagesToDelete);
+    console.log('New images to upload:', req.files?.length || 0);
     
     // Choose the appropriate Supabase client based on role
     const client = req.user.role === 'admin' ? adminSupabase : supabase;
@@ -288,6 +267,39 @@ router.put('/:id', verifyToken, upload.array('images', 10), async (req, res) => 
       return res.status(403).json({ message: 'You do not have permission to update this post' });
     }
     
+    // Delete the selected images if any
+    if (imagesToDelete.length > 0) {
+      // First get the file paths so we can delete from storage
+      const { data: imagesToRemove, error: fetchError } = await client
+        .from('blog_images')
+        .select('id, file_path')
+        .in('id', imagesToDelete);
+      
+      if (!fetchError && imagesToRemove?.length > 0) {
+        // Delete the files from storage
+        for (const img of imagesToRemove) {
+          const { error: storageError } = await adminSupabase
+            .storage
+            .from('blog-images')
+            .remove([img.file_path]);
+            
+          if (storageError) {
+            console.error(`Error deleting image file ${img.file_path}:`, storageError);
+          }
+        }
+        
+        // Delete the database records
+        const { error: deleteImagesError } = await client
+          .from('blog_images')
+          .delete()
+          .in('id', imagesToDelete);
+          
+        if (deleteImagesError) {
+          console.error('Error deleting image records:', deleteImagesError);
+        }
+      }
+    }
+    
     // Update the post
     const { data: updatedPost, error: updateError } = await client
       .from('blog_posts')
@@ -300,12 +312,56 @@ router.put('/:id', verifyToken, upload.array('images', 10), async (req, res) => 
       throw updateError;
     }
     
-    // Handle image uploads similar to post creation
-    // ...image handling code...
+    // Process new images if any
+    const newImages = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        try {
+          const fileExt = file.originalname.split('.').pop();
+          const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
+          const filePath = `${id}/${fileName}`;
+          
+          // Use the utility function to upload the file
+          const imageData = await uploadFileToStorage(file, filePath);
+          
+          // Insert image record in database
+          const { data: dbImage, error: imageError } = await adminSupabase
+            .from('blog_images')
+            .insert({
+              post_id: id,
+              file_name: file.originalname,
+              file_path: filePath,
+              url: imageData.url,
+              content_type: file.mimetype
+            })
+            .select()
+            .single();
+            
+          if (imageError) {
+            console.error('Image database record error:', imageError);
+            continue;
+          }
+          
+          newImages.push(dbImage);
+        } catch (fileError) {
+          console.error('Error processing file:', fileError);
+        }
+      }
+    }
+    
+    // Get all current images for the post after updates
+    const { data: currentImages, error: imagesError } = await client
+      .from('blog_images')
+      .select('*')
+      .eq('post_id', id);
     
     res.status(200).json({
       message: 'Post updated successfully',
-      post: updatedPost
+      post: {
+        ...updatedPost,
+        images: currentImages || []
+      },
+      newImages
     });
   } catch (error) {
     console.error('Error updating blog post:', error);

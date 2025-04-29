@@ -103,8 +103,14 @@ export const blogService = {
   getPosts: (page = 1, limit = 10, search = '') => 
     api.get(`/api/blog?page=${page}&limit=${limit}&search=${search}`),
   getPost: (id) => api.get(`/api/blog/${id}`),
-  createPost: (postData) => api.post('/api/blog', postData),
-  updatePost: (id, postData) => api.put(`/api/blog/${id}`, postData),
+  createPost: (postData) => {
+    // We don't need to manually set config here as the interceptor handles FormData
+    return api.post('/api/blog', postData);
+  },
+  updatePost: (id, postData) => {
+    // We don't need to manually set config here as the interceptor handles FormData
+    return api.put(`/api/blog/${id}`, postData);
+  },
   deletePost: (id) => api.delete(`/api/blog/${id}`),
 };
 

@@ -66,7 +66,7 @@ const AdminDashboard = () => {
       </div>
       
       <div className="admin-actions">
-        <Link to="/admin/blogs/create" className="btn primary">Create New Post</Link>
+        <Link to="/admin/posts" className="btn primary">Create New Post</Link>
         <Link to="/admin/users" className="btn secondary">Manage Users</Link>
         <Link to="/admin/blogs" className="btn secondary">Manage Blog Posts</Link>
       </div>

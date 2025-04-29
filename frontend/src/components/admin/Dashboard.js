@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { adminService } from '../../services/api';
+import api from '../../services/api';
 import './Dashboard.css';
 
 // Cache for stats to prevent duplicate requests
@@ -10,8 +11,10 @@ const CACHE_DURATION = 60000; // 1 minute cache
 
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
+  const [recentPosts, setRecentPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [postDeleteLoading, setPostDeleteLoading] = useState(false);
 
   // Debounced fetch function
   const fetchStats = useCallback(async () => {
@@ -40,22 +43,55 @@ const Dashboard = () => {
     }
   }, []);
 
+  // Fetch recent posts
+  const fetchRecentPosts = useCallback(async () => {
+    try {
+      const response = await api.get('/blog?page=1&limit=5');
+      setRecentPosts(response.data.posts);
+    } catch (err) {
+      console.error('Error fetching recent posts:', err);
+    }
+  }, []);
+
+  const handleDeletePost = async (postId) => {
+    if (!window.confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      setPostDeleteLoading(true);
+      await api.delete(`/blog/${postId}`);
+      
+      // Remove the deleted post from the list
+      setRecentPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
+      
+      // Refresh stats as post count changed
+      fetchStats();
+    } catch (err) {
+      console.error('Error deleting post:', err);
+      alert('Failed to delete post. Please try again.');
+    } finally {
+      setPostDeleteLoading(false);
+    }
+  };
+
   // Use effect with cleanup to prevent memory leaks
   useEffect(() => {
     let mounted = true;
     
-    const loadStats = async () => {
+    const loadDashboardData = async () => {
       await fetchStats();
+      await fetchRecentPosts();
       if (!mounted) return;
     };
     
-    loadStats();
+    loadDashboardData();
     
     // Cleanup function
     return () => {
       mounted = false;
     };
-  }, [fetchStats]);
+  }, [fetchStats, fetchRecentPosts]);
 
   if (loading) {
     return (
@@ -111,8 +147,11 @@ const Dashboard = () => {
       <div className="admin-actions">
         <h2>Quick Actions</h2>
         <div className="action-buttons">
-          <Link to="/admin/posts" className="action-button">
+          <Link to="/admin/blogs/create" className="action-button">
             <i className="fas fa-edit"></i> Create New Post
+          </Link>
+          <Link to="/admin/blogs" className="action-button">
+            <i className="fas fa-list"></i> Manage All Posts
           </Link>
           <Link to="/admin/users" className="action-button">
             <i className="fas fa-users"></i> Manage Users
@@ -121,6 +160,79 @@ const Dashboard = () => {
             <i className="fas fa-external-link-alt"></i> View Blog
           </Link>
         </div>
+      </div>
+      
+      {/* Recent Posts Section */}
+      <div className="recent-posts-section">
+        <div className="section-header">
+          <h2>Recent Blog Posts</h2>
+          <Link to="/admin/blogs" className="view-all-link">
+            View All Posts <i className="fas fa-arrow-right"></i>
+          </Link>
+        </div>
+        
+        {recentPosts.length > 0 ? (
+          <div className="recent-posts-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Author</th>
+                  <th>Date</th>
+                  <th>Images</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentPosts.map(post => (
+                  <tr key={post.id}>
+                    <td className="post-title-cell">
+                      <div className="post-title-with-excerpt">
+                        <div className="post-title">{post.title}</div>
+                        <div className="post-excerpt">{post.content.substring(0, 60)}...</div>
+                      </div>
+                    </td>
+                    <td>{post.users?.name || 'Unknown'}</td>
+                    <td>{new Date(post.created_at).toLocaleDateString()}</td>
+                    <td>
+                      {post.images && post.images.length > 0 ? (
+                        <span className="image-count">
+                          <i className="fas fa-image"></i> {post.images.length}
+                        </span>
+                      ) : (
+                        <span className="no-images">None</span>
+                      )}
+                    </td>
+                    <td className="post-actions">
+                      <Link to={`/blog/${post.id}`} className="action-btn view" title="View Post">
+                        <i className="fas fa-eye"></i>
+                      </Link>
+                      <Link to={`/admin/blogs/edit/${post.id}`} className="action-btn edit" title="Edit Post">
+                        <i className="fas fa-pencil-alt"></i>
+                      </Link>
+                      <button 
+                        className="action-btn delete" 
+                        title="Delete Post"
+                        onClick={() => handleDeletePost(post.id)}
+                        disabled={postDeleteLoading}
+                      >
+                        <i className="fas fa-trash"></i>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="no-posts-message">
+            <i className="fas fa-file-alt"></i>
+            <p>No blog posts found. Create your first post!</p>
+            <Link to="/admin/blogs/create" className="btn-create-post">
+              Create Post
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
